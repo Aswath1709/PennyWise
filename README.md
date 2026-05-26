@@ -111,91 +111,91 @@ pennywise-2.0/
     └── init.sql               # Database schema
 ```
 
-## Getting Started
+# PennyWise Project
 
-### Prerequisites
+## Project Overview
+PennyWise is a full-stack application for personal finance management, featuring analytics, categorization, insights, and more.
+
+## Prerequisites
 - Docker & Docker Compose
-- Node.js 18+ (for local development)
-- Python 3.11+ (for local development)
-- Gemini API key (get one at https://makersuite.google.com/app/apikey)
+- Node.js (for frontend/gateway dev)
+- Python 3.8+ (for data-service dev)
 
-### Quick Start with Docker
+## Quick Start (Recommended)
 
-1. Clone the repository:
-```bash
-git clone https://github.com/yourusername/pennywise-2.0.git
-cd pennywise-2.0
+### 1. Clone the repository
+```
+git clone <your-repo-url>
+cd PennyWise
 ```
 
-2. Create environment file:
-```bash
-cp .env.example .env
-# Edit .env and add your GEMINI_API_KEY
+### 2. Start with Docker Compose
 ```
-
-3. Start all services:
-```bash
 docker-compose up --build
 ```
 
-4. Access the application:
-- Frontend: http://localhost:5173
-- API Gateway: http://localhost:3000
-- API Docs: http://localhost:3000/api/docs
-- Data Service: http://localhost:8000
+This will build and start all services (backend, frontend, gateway).
 
-### Local Development
+---
 
-**Gateway (Node.js):**
-```bash
-cd gateway
-npm install
-npm run dev
-```
+## Manual Setup
 
-**Data Service (Python):**
-```bash
-cd data-service
-python -m venv venv
-source venv/bin/activate  # or venv\Scripts\activate on Windows
-pip install -r requirements.txt
-uvicorn app.main:app --reload
-```
+### Backend (data-service)
+1. Navigate to the backend folder:
+  ```
+  cd data-service
+  ```
+2. Create and activate a virtual environment:
+  ```
+  python3 -m venv venv
+  source venv/bin/activate
+  ```
+3. Install dependencies:
+  ```
+  pip install -r requirements.txt
+  ```
+4. Run the backend:
+  ```
+  uvicorn app.main:app --reload
+  ```
 
-**Frontend (React):**
-```bash
-cd frontend
-npm install
-npm run dev
-```
+### Frontend
+1. Navigate to the frontend folder:
+  ```
+  cd frontend
+  ```
+2. Install dependencies:
+  ```
+  npm install
+  ```
+3. Start the frontend:
+  ```
+  npm run dev
+  ```
 
-## API Endpoints
+### Gateway
+1. Navigate to the gateway folder:
+  ```
+  cd gateway
+  ```
+2. Install dependencies:
+  ```
+  npm install
+  ```
+3. Start the gateway:
+  ```
+  npm start
+  ```
 
-### Authentication
-- `POST /api/auth/register` - Create account
-- `POST /api/auth/login` - Get JWT token
-- `GET /api/auth/me` - Get current user
+---
 
-### Transactions
-- `GET /api/transactions` - List transactions
-- `POST /api/transactions` - Create transaction
-- `POST /api/transactions/bulk` - Bulk create
-- `PUT /api/transactions/:id` - Update
-- `DELETE /api/transactions/:id` - Delete
+## Notes
+- Do not commit .env files or venv folders.
+- Update the .env files as needed for your environment.
+- For production, configure environment variables and secrets securely.
 
-### Budgets
-- `GET /api/budgets` - List with progress
-- `POST /api/budgets` - Create budget
-- `GET /api/budgets/alerts/active` - Get alerts
-
-### Data Service (via proxy)
-- `POST /api/data/pdf/parse-and-categorize` - Parse PDF
-- `POST /api/data/analytics/summary` - Get analytics
-- `POST /api/data/insights/generate` - AI insights
-- `POST /api/data/query` - Natural language query
-
-## Environment Variables
-
+## License
+MIT
 | Variable | Description | Default |
 |----------|-------------|---------|
 | POSTGRES_USER | Database user | pennywise |
