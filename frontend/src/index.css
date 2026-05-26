@@ -1,0 +1,76 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom styles */
+body {
+  @apply bg-gray-50 text-gray-900 antialiased;
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-gray-100;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-gray-300 rounded-full;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-gray-400;
+}
+
+/* Card hover effects */
+.card-hover {
+  @apply transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5;
+}
+
+/* Gradient backgrounds */
+.gradient-primary {
+  @apply bg-gradient-to-r from-primary-500 to-primary-600;
+}
+
+.gradient-accent {
+  @apply bg-gradient-to-r from-accent-500 to-accent-600;
+}
+
+/* Loading spinner */
+.spinner {
+  @apply animate-spin rounded-full border-2 border-gray-300 border-t-primary-500;
+}
+
+/* File drop zone */
+.dropzone {
+  @apply border-2 border-dashed border-gray-300 rounded-xl p-8 text-center transition-colors;
+}
+
+.dropzone:hover,
+.dropzone-active {
+  @apply border-primary-500 bg-primary-50;
+}
+
+/* Chart container */
+.chart-container {
+  @apply bg-white rounded-xl p-4 shadow-sm;
+}
+
+/* Stat card */
+.stat-card {
+  @apply bg-white rounded-xl p-6 shadow-sm border border-gray-100;
+}
+
+/* Animation keyframes */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out;
+}

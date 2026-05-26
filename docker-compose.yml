@@ -1,0 +1,92 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: pennywise-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-pennywise}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pennywise_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-pennywise}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pennywise"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - pennywise-network
+
+  # Node.js API Gateway
+  gateway:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    container_name: pennywise-gateway
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-pennywise}:${POSTGRES_PASSWORD:-pennywise_secret}@postgres:5432/${POSTGRES_DB:-pennywise}
+      JWT_SECRET: ${JWT_SECRET:-your-super-secret-jwt-key-change-in-production}
+      DATA_SERVICE_URL: http://data-service:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./gateway:/app
+      - /app/node_modules
+    networks:
+      - pennywise-network
+
+  # Python Data Processing Service
+  data-service:
+    build:
+      context: ./data-service
+      dockerfile: Dockerfile
+    container_name: pennywise-data-service
+    environment:
+      PYTHONUNBUFFERED: 1
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-pennywise}:${POSTGRES_PASSWORD:-pennywise_secret}@postgres:5432/${POSTGRES_DB:-pennywise}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./data-service:/app
+      - ./uploads:/app/uploads
+    networks:
+      - pennywise-network
+
+  # React Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: pennywise-frontend
+    environment:
+      VITE_API_URL: /api
+    ports:
+      - "5173:5173"
+    depends_on:
+      - gateway
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    networks:
+      - pennywise-network
+
+volumes:
+  postgres_data:
+
+networks:
+  pennywise-network:
+    driver: bridge
