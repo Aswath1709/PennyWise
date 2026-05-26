@@ -1,4 +1,7 @@
-# PennyWise 2.0 - AI-Powered Personal Finance Tracker
+
+# PennyWise.wtf (wtf stands for Watch The Finance)
+
+> **Note:** In this project, "wtf" stands for **Watch The Finance** (not 2.0 or anything else).
 
 A full-stack microservices application demonstrating modern DevSecOps practices with AI-powered financial analysis.
 
@@ -111,10 +114,9 @@ pennywise-2.0/
     └── init.sql               # Database schema
 ```
 
-# PennyWise Project
 
 ## Project Overview
-PennyWise is a full-stack application for personal finance management, featuring analytics, categorization, insights, and more.
+PennyWise.wtf is a full-stack application for personal finance management, featuring analytics, categorization, insights, and more.
 
 ## Prerequisites
 - Docker & Docker Compose
