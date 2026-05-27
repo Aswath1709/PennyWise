@@ -1,7 +1,6 @@
 
 # PennyWise.wtf (Watch The Finance)
 
-> **Note:** In this project, "wtf" stands for **Watch The Finance** (not 2.0 or anything else).
 
 A full-stack microservices application demonstrating modern DevSecOps practices with AI-powered financial analysis.
 
