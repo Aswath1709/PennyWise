@@ -1,5 +1,5 @@
 
-# PennyWise.wtf (wtf stands for Watch The Finance)
+# PennyWise.wtf (Watch The Finance)
 
 > **Note:** In this project, "wtf" stands for **Watch The Finance** (not 2.0 or anything else).
 
