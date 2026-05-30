@@ -1,5 +1,5 @@
 
-# PennyWise.wtf (Watch The Finance)
+# PennyWise
 
 
 A full-stack microservices application demonstrating modern DevSecOps practices with AI-powered financial analysis.
