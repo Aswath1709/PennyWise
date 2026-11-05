@@ -12,6 +12,14 @@ except ImportError:
     genai = None
     genai_types = None
     GENAI_AVAILABLE = False
+
+def no_thinking_config():
+    """ThinkingConfig with thinking off, or None on google-genai versions that don't support it."""
+    try:
+        return genai_types.ThinkingConfig(thinking_budget=0)
+    except Exception:
+        return None
+
 from app.services.analytics_service import FinanceTools, get_gemini_tools
 
 # 1. RULE-BASED SYSTEM PROMPT
@@ -93,7 +101,7 @@ class FinanceAgentService:
                     temperature=0,
                     # Picking a tool doesn't need extended reasoning; thinking was the main
                     # source of multi-second latency on 2.5 Flash.
-                    thinking_config=genai_types.ThinkingConfig(thinking_budget=0),
+                    thinking_config=no_thinking_config(),
                     automatic_function_calling=genai_types.AutomaticFunctionCallingConfig(disable=True),
                     tool_config=genai_types.ToolConfig(
                         function_calling_config=genai_types.FunctionCallingConfig(mode="ANY")
