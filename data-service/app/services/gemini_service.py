@@ -102,56 +102,112 @@ class GeminiService:
             return self._keyword_categorize(transactions)
 
         try:
-            # Get unique merchants
-            unique_merchants = list(set(get_field(t, 'description', '') for t in transactions))
-
-            # Sanitize descriptions
-            sanitized_merchants = [sanitize_description(m) for m in unique_merchants]
-
-            # Categorize with Gemini
-            merchants_text = "\n".join(f"{i + 1}. {m}" for i, m in enumerate(sanitized_merchants))
-
-            prompt = CATEGORIZATION_PROMPT.format(
-                categories=", ".join(CATEGORIES),
-                merchants=merchants_text
-            )
-
-            response = self.client.models.generate_content(
-                model=self.model_name,
-                contents=prompt
-            )
-
-            # Parse response
-            categories = parse_llm_response(response.text, len(unique_merchants))
-
-            # Build merchant -> category map
-            merchant_category = {m: c for m, c in zip(unique_merchants, categories)}
-
-            # Apply to all transactions
-            result = []
-            for t in transactions:
-                desc = get_field(t, 'description', '')
-                category = merchant_category.get(desc, 'other')
-
-                # KEEP THE ORIGINAL SIGNED AMOUNT FROM PDF PARSER
-                # pdf_parser already returns: negative = expense, positive = income
-                amount = get_field(t, 'amount', 0)
-
-                result.append(CategorizedTransaction(
-                    date=get_field(t, 'date'),
-                    description=sanitize_description(desc),
-                    amount=amount,
-                    type=get_field(t, 'type', 'debit'),
-                    category_id=get_category_id(category),
-                    category_name=category,
-                    confidence=0.85
-                ))
-
-            return result
-
+            return await self._llm_categorize(transactions, get_field)
         except Exception as e:
             print(f"Gemini categorization error: {e}")
             return self._keyword_categorize(transactions)
+
+    async def _llm_categorize(self, transactions, get_field) -> List[CategorizedTransaction]:
+        """
+        Categorize with Gemini using structured JSON output.
+
+        - Dedupes by (sanitized description, direction) so each merchant is sent once.
+        - Sends money-in / money-out as a hint (a credit is never "dining").
+        - Batches requests and runs them concurrently.
+        - Each answer is keyed by id, so a skipped line can't shift every later category.
+        - Anything the model leaves as "other" gets a second chance from keyword rules.
+        """
+        import asyncio
+
+        def direction(t) -> str:
+            amount = float(get_field(t, 'amount', 0) or 0)
+            tx_type = (get_field(t, 'type', '') or '').lower()
+            if tx_type == 'credit' or (tx_type != 'debit' and amount > 0):
+                return 'in'
+            return 'out'
+
+        keys = []
+        key_index = {}
+        for t in transactions:
+            key = (sanitize_description(get_field(t, 'description', '') or ''), direction(t))
+            if key not in key_index:
+                key_index[key] = len(keys)
+                keys.append(key)
+
+        response_schema = genai_types.Schema(
+            type="ARRAY",
+            items=genai_types.Schema(
+                type="OBJECT",
+                properties={
+                    "id": genai_types.Schema(type="INTEGER"),
+                    "category": genai_types.Schema(type="STRING", enum=CATEGORIES),
+                },
+                required=["id", "category"],
+            ),
+        )
+        config = genai_types.GenerateContentConfig(
+            temperature=0,
+            response_mime_type="application/json",
+            response_schema=response_schema,
+            # Classification needs no reasoning; thinking only adds latency.
+            thinking_config=genai_types.ThinkingConfig(thinking_budget=0),
+        )
+
+        async def run_batch(offset: int, batch):
+            lines = "\n".join(
+                f"{offset + i}. [{'money IN' if d == 'in' else 'money OUT'}] {desc}"
+                for i, (desc, d) in enumerate(batch)
+            )
+            prompt = CATEGORIZATION_PROMPT.format(
+                categories=", ".join(CATEGORIES), merchants=lines
+            )
+            resp = await self.client.aio.models.generate_content(
+                model=self.model_name, contents=prompt, config=config
+            )
+            out = {}
+            for item in json.loads(resp.text or "[]"):
+                try:
+                    out[int(item["id"])] = str(item["category"]).lower()
+                except (KeyError, TypeError, ValueError):
+                    continue
+            return out
+
+        batch_size = 40
+        results = await asyncio.gather(
+            *(run_batch(i, keys[i:i + batch_size]) for i in range(0, len(keys), batch_size)),
+            return_exceptions=True,
+        )
+        id_to_category = {}
+        for r in results:
+            if isinstance(r, Exception):
+                print(f"Gemini batch failed, using keywords for it: {r}")
+                continue
+            id_to_category.update(r)
+
+        categories = []
+        for idx, (desc, d) in enumerate(keys):
+            cat = id_to_category.get(idx)
+            if cat not in CATEGORIES or cat == 'other':
+                kw = categorize_by_keywords(desc)
+                cat = kw if kw != 'other' else (cat if cat in CATEGORIES else 'other')
+            categories.append(cat)
+
+        result = []
+        for t in transactions:
+            desc = get_field(t, 'description', '') or ''
+            sanitized = sanitize_description(desc)
+            category = categories[key_index[(sanitized, direction(t))]]
+            # KEEP THE ORIGINAL SIGNED AMOUNT FROM PDF PARSER
+            result.append(CategorizedTransaction(
+                date=get_field(t, 'date'),
+                description=sanitized,
+                amount=get_field(t, 'amount', 0),
+                type=get_field(t, 'type', 'debit'),
+                category_id=get_category_id(category),
+                category_name=category,
+                confidence=0.85
+            ))
+        return result
 
     def _keyword_categorize(self, transactions: List[ParsedTransaction]) -> List[CategorizedTransaction]:
         """Fallback keyword-based categorization."""

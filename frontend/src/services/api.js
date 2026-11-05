@@ -93,8 +93,8 @@ export const dataService = {
     api.post('/data/insights/savings-opportunities', { transactions }),
 
   // Natural Language Query
-  askQuestion: (query, transactions) => 
-    api.post('/data/query', { query, transactions }),
+  askQuestion: (query, transactions, history = []) => 
+    api.post('/data/query', { query, transactions, history }),
 
   getQuickAnswer: (query, transactions) => 
     api.post('/data/query/quick-answers', { query, transactions }),

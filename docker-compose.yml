@@ -54,6 +54,7 @@ services:
     environment:
       PYTHONUNBUFFERED: 1
       GEMINI_API_KEY: ${GEMINI_API_KEY}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
       DATABASE_URL: postgresql://${POSTGRES_USER:-pennywise}:${POSTGRES_PASSWORD:-pennywise_secret}@postgres:5432/${POSTGRES_DB:-pennywise}
     ports:
       - "8000:8000"

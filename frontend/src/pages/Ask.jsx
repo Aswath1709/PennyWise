@@ -166,6 +166,12 @@ export default function Ask() {
 
     const userQuery = query.trim()
     setQuery('')
+
+    // Recent turns so follow-ups like "apart from transfer?" have context
+    const history = messages
+      .filter(m => !m.isError && m.content)
+      .slice(-6)
+      .map(m => ({ type: m.type, content: m.content }))
     
     addMessage({ type: 'user', content: userQuery })
     setLoading(true)
@@ -180,7 +186,7 @@ export default function Ask() {
         category_name: t.category_name
       }))
 
-      const response = await dataService.askQuestion(userQuery, formattedTx)
+      const response = await dataService.askQuestion(userQuery, formattedTx, history)
       
       addMessage({ 
         type: 'bot', 
