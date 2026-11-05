@@ -17,6 +17,7 @@ class QueryWithDataRequest(BaseModel):
     """Request with query and transaction data"""
     query: str
     transactions: List[dict]
+    history: List[dict] = []  # recent chat messages: {"type": "user"|"bot", "content": str}
 
 
 @router.post("/", response_model=NLPQueryResponse)
@@ -57,7 +58,8 @@ async def process_query(request: QueryWithDataRequest):
     result = agent.ask(
         query=request.query,
         session_id="default",
-        transactions=formatted_tx
+        transactions=formatted_tx,
+        history=request.history
     )
     
     # Get chart if generated
@@ -74,7 +76,7 @@ async def process_query(request: QueryWithDataRequest):
     
     return NLPQueryResponse(
         query=request.query,
-        response=result.get("response", "I couldn't process your question."),
+        response=result.get("response") or "I couldn't process your question.",
         data=None,  # Don't return raw data
         visualization=visualization
     )

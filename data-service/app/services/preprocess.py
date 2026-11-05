@@ -18,7 +18,7 @@ from typing import List, Dict, Optional
 CATEGORIES = [
     "groceries", "dining", "transport", "subscriptions",
     "utilities", "shopping", "entertainment", "health",
-    "rent", "income", "fees", "transfer", "other"
+    "rent", "travel", "income", "fees", "transfer", "other"
 ]
 
 # Map category names to database IDs
@@ -44,32 +44,35 @@ def get_category_id(category_name: str) -> int:
     """Get database category ID from category name."""
     return CATEGORY_TO_ID.get(category_name.lower(), 11)  # Default to "other" (11)
 
-CATEGORIZATION_PROMPT = """Categorize each merchant into exactly ONE category.
+CATEGORIZATION_PROMPT = """You categorize lines from a US bank or credit card statement.
+Assign each line exactly ONE category from: {categories}
 
-Categories: {categories}
+Each line is "<id>. [money IN|money OUT] <description>". Descriptions are raw bank text:
+ignore prefixes/suffixes like POS, DEBIT CARD PURCHASE, PURCHASE AUTHORIZED ON, RECURRING,
+SQ *, TST*, PAYPAL *, card/ref placeholders, store numbers, cities and state codes, and
+identify the underlying merchant using your knowledge of brands.
 
-Merchants:
+Category guide:
+- groceries: supermarkets, grocery & food stores (Trader Joe's, Whole Foods, H Mart, Kroger, Aldi)
+- dining: restaurants, cafes, bars, fast food, coffee, food delivery (DoorDash, Uber Eats)
+- transport: Uber/Lyft rides, gas stations, parking, tolls, public transit, car service
+- travel: airlines, hotels, Airbnb, car rental, travel agencies
+- subscriptions: streaming, software, apps, gym, memberships, recurring digital services
+- utilities: electricity, water, gas bill, internet, mobile/phone carriers
+- shopping: Amazon, retail, clothing, electronics, home goods, department stores, online shops
+- entertainment: movies, concerts, events, games, tickets
+- health: pharmacy, doctor, dentist, hospital, insurance premiums
+- rent: rent, mortgage, property management, HOA
+- income: payroll, salary, direct deposit, interest earned, refunds, cashback (usually money IN)
+- fees: bank fees, ATM fees, overdraft, late fees, interest charged, foreign transaction fees
+- transfer: moving money between people/accounts: Zelle, Venmo, Cash App, internal/online
+  transfers, credit card bill payments ("PAYMENT THANK YOU", "AUTOPAY"), savings transfers
+- other: ONLY if you genuinely cannot tell what it is. Prefer a best-guess category.
+
+Lines:
 {merchants}
 
-Return ONLY a JSON array of category strings, one per merchant, in the same order.
-Example: ["dining", "groceries", "transport"]
-
-Rules:
-- Supermarkets, food stores → groceries
-- Restaurants, cafes, fast food, coffee shops → dining
-- Uber, Lyft, gas stations, parking, transit → transport
-- Netflix, Spotify, gym memberships, monthly services → subscriptions
-- Electric, water, internet, phone bills → utilities
-- Amazon, retail stores, clothing → shopping
-- Movies, concerts, gaming, events → entertainment
-- Pharmacy, doctor, hospital, medical → health
-- Rent, lease, mortgage, housing → rent
-- Payroll, salary, deposits, refunds → income
-- Bank fees, ATM fees, interest charges → fees
-- Zelle, Venmo, bank transfers → transfer
-- Unknown or uncategorized → other
-
-Return ONLY valid JSON array, no explanation."""
+Return a JSON array with one object per line: {{"id": <id>, "category": "<category>"}}."""
 
 # ========== SANITIZATION PATTERNS (EXACT from original) ==========
 
@@ -251,6 +254,9 @@ def categorize_by_keywords(description: str) -> str:
                    'ach credit', 'wire transfer in', 'deposit', 'refund', 'reimbursement'],
         'fees': ['fee', 'charge', 'interest', 'late fee', 'overdraft', 'atm fee',
                  'service charge', 'annual fee', 'maintenance fee', 'penalty'],
+        'travel': ['airline', 'airlines', 'delta air', 'united air', 'american air', 'jetblue',
+                   'southwest', 'spirit air', 'hotel', 'marriott', 'hilton', 'hyatt', 'airbnb',
+                   'expedia', 'booking.com', 'hertz', 'avis', 'enterprise rent'],
         'transfer': ['transfer', 'zelle', 'venmo', 'paypal', 'wire', 'ach', 'cash app',
                      'payment to', 'payment from', 'online transfer', 'bank transfer'],
     }

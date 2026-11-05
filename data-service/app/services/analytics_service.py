@@ -10,20 +10,31 @@ from typing import List, Dict, Any, Optional
 # 1. Native Gemini Tools Definitions
 # ==========================================
 
-def aggregate(category: Optional[str], income_only: Optional[bool], expenses_only: Optional[bool]):
-    """Use this for ANY math, totals, sums, or averages."""
+def aggregate(category: Optional[str], income_only: Optional[bool], expenses_only: Optional[bool],
+              exclude_categories: Optional[List[str]]):
+    """
+    Use this for ANY math, totals, sums, or averages, and for "which category do I spend most on".
+    - exclude_categories: Categories to leave out, e.g. ['transfer'] for "apart from transfers"
+    """
     pass
 
-def create_chart(chart_type: Optional[str], group_by: Optional[str], title: Optional[str]):
-    """Use when the user explicitly asks for a visual, graph, or chart."""
+def create_chart(chart_type: Optional[str], group_by: Optional[str], title: Optional[str],
+                 exclude_categories: Optional[List[str]]):
+    """
+    Spending by category with a chart. Use for "which category do I spend the most on"
+    or when the user asks for a visual, graph, or chart.
+    - exclude_categories: Categories to leave out, e.g. ['transfer'] for "apart from transfers"
+    """
     pass
 
 # UPDATED: Added transaction_type parameter to the tool definition
-def query_transactions(category: Optional[str], search_term: Optional[str], transaction_type: Optional[str]):
+def query_transactions(category: Optional[str], search_term: Optional[str], transaction_type: Optional[str],
+                       exclude_categories: Optional[List[str]]):
     """
     Use ONLY to search for specific lists of transactions.
     Set transaction_type to 'credit' for received money/income.
     Set transaction_type to 'debit' for spending/expenses.
+    exclude_categories: Categories to leave out.
     """
     pass
     
@@ -35,7 +46,8 @@ def compare_periods(
     period1: str,
     period2: str,
     chart_type: Optional[str],
-    show_chart: Optional[bool]
+    show_chart: Optional[bool],
+    exclude_categories: Optional[List[str]]
 ):
     """
     Compare total spending between two time periods (e.g., months or date ranges).
@@ -44,6 +56,7 @@ def compare_periods(
     - period2: Second period label, e.g. 'November 2024' or '2024-11'
     - chart_type: 'bar' (default) or 'pie'
     - show_chart: Whether to generate a chart (default True)
+    - exclude_categories: Categories to leave out, e.g. ['transfer'] for "apart from transfers"
     """
     pass
 
@@ -51,7 +64,8 @@ def category_breakdown_by_period(
     period1: str,
     period2: Optional[str],
     chart_type: Optional[str],
-    show_chart: Optional[bool]
+    show_chart: Optional[bool],
+    exclude_categories: Optional[List[str]]
 ):
     """
     Show spending broken down by category for one or two time periods.
@@ -61,10 +75,12 @@ def category_breakdown_by_period(
     - period2: Optional second period for side-by-side comparison
     - chart_type: 'bar' (default, grouped) or 'pie'
     - show_chart: Whether to generate a chart (default True)
+    - exclude_categories: Categories to leave out, e.g. ['transfer'] for "apart from transfers"
     """
     pass
 
-def spending_trend(category: Optional[str], chart_type: Optional[str], show_chart: Optional[bool]):
+def spending_trend(category: Optional[str], chart_type: Optional[str], show_chart: Optional[bool],
+                   exclude_categories: Optional[List[str]]):
     """
     Show monthly spending trend over time with a chart.
     Use when user asks about spending over time, monthly trends, how spending has changed,
@@ -72,16 +88,18 @@ def spending_trend(category: Optional[str], chart_type: Optional[str], show_char
     - category: Optional category filter (e.g. 'groceries', 'dining')
     - chart_type: 'bar' (default) or 'line'
     - show_chart: Whether to generate a chart (default True)
+    - exclude_categories: Categories to leave out, e.g. ['transfer'] for "apart from transfers"
     """
     pass
 
-def top_merchants(limit: Optional[int], show_chart: Optional[bool]):
+def top_merchants(limit: Optional[int], show_chart: Optional[bool], exclude_categories: Optional[List[str]]):
     """
     Find the top merchants or vendors by total spending with a horizontal bar chart.
     Use when user asks where they spend the most, top vendors, biggest merchants,
     or which stores/services cost the most.
     - limit: Number of top merchants to show (default 10)
     - show_chart: Whether to generate a chart (default True)
+    - exclude_categories: Categories to leave out, e.g. ['transfer'] for "apart from transfers"
     """
     pass
 
@@ -104,7 +122,8 @@ def net_savings_summary(period: Optional[str]):
     """
     pass
 
-def biggest_transactions(limit: Optional[int], transaction_type: Optional[str], category: Optional[str]):
+def biggest_transactions(limit: Optional[int], transaction_type: Optional[str], category: Optional[str],
+                         exclude_categories: Optional[List[str]]):
     """
     Find the largest individual transactions by amount.
     Use when user asks about biggest expenses, most expensive purchases, largest transactions,
@@ -112,6 +131,7 @@ def biggest_transactions(limit: Optional[int], transaction_type: Optional[str], 
     - limit: Number of transactions to return (default 10)
     - transaction_type: 'debit' for expenses (default), 'credit' for income
     - category: Optional category filter
+    - exclude_categories: Categories to leave out, e.g. ['transfer'] for "apart from transfers"
     """
     pass
 
@@ -193,10 +213,22 @@ class FinanceTools(AnalyticsService):
             return method(**params)
         return {"error": f"Tool {tool_name} not found"}
 
+    @staticmethod
+    def _exclude(df, exclude_categories=None):
+        """Drop rows whose category is in exclude_categories (case-insensitive, tolerant of plurals)."""
+        if not exclude_categories or df.empty:
+            return df
+        if isinstance(exclude_categories, str):
+            exclude_categories = [exclude_categories]
+        norm = lambda c: str(c).strip().lower().rstrip('s')
+        excluded = {norm(c) for c in exclude_categories}
+        return df[~df['category'].map(norm).isin(excluded)]
+
     # UPDATED: Added transaction_type filter logic
-    def query_transactions(self, category=None, search_term=None, transaction_type=None, **kwargs):
+    def query_transactions(self, category=None, search_term=None, transaction_type=None,
+                           exclude_categories=None, **kwargs):
         if self.df.empty: return {"transactions": []}
-        df = self.df.copy()
+        df = self._exclude(self.df.copy(), exclude_categories)
         
         # Filter by type (credit = income, debit = expense)
         if transaction_type == 'credit':
@@ -219,9 +251,10 @@ class FinanceTools(AnalyticsService):
             
         return {"transactions": txs}
 
-    def aggregate(self, category=None, income_only=False, expenses_only=False, **kwargs):
+    def aggregate(self, category=None, income_only=False, expenses_only=False,
+                  exclude_categories=None, **kwargs):
         if self.df.empty: return {"total": 0, "results": {}}
-        df = self.df.copy()
+        df = self._exclude(self.df.copy(), exclude_categories)
         
         if income_only:
             df = df[df['amount'] > 0]
@@ -238,9 +271,10 @@ class FinanceTools(AnalyticsService):
 
     # ... rest of your methods (create_chart, find_recurring, etc.) stay the same
 
-    def create_chart(self, chart_type="pie", group_by="category", title=None, **kwargs):
+    def create_chart(self, chart_type="pie", group_by="category", title=None,
+                     exclude_categories=None, **kwargs):
         if self.df.empty: return {"error": "No data available to chart."}
-        expenses = self.df[self.df['amount'] < 0]
+        expenses = self._exclude(self.df[self.df['amount'] < 0], exclude_categories)
         if expenses.empty: return {"error": "No expense data available to chart."}
         
         data = expenses.groupby('category')['amount'].sum().abs().to_dict()
@@ -317,7 +351,8 @@ class FinanceTools(AnalyticsService):
         return df[mask]
 
     def compare_periods(self, period1: str, period2: str,
-                        chart_type: str = "bar", show_chart: bool = True, **kwargs):
+                        chart_type: str = "bar", show_chart: bool = True,
+                        exclude_categories=None, **kwargs):
         """Compare total spending between two time periods with optional bar chart."""
         if self.df.empty:
             return {"error": "No transaction data available."}
@@ -328,7 +363,7 @@ class FinanceTools(AnalyticsService):
         if y1 is None or y2 is None:
             return {"error": f"Could not parse periods: '{period1}', '{period2}'"}
 
-        expenses = self.df[self.df['amount'] < 0].copy()
+        expenses = self._exclude(self.df[self.df['amount'] < 0].copy(), exclude_categories)
         df1 = self._filter_by_period(expenses, y1, m1)
         df2 = self._filter_by_period(expenses, y2, m2)
 
@@ -369,7 +404,8 @@ class FinanceTools(AnalyticsService):
         return result
 
     def category_breakdown_by_period(self, period1: str, period2: str = None,
-                                      chart_type: str = "bar", show_chart: bool = True, **kwargs):
+                                      chart_type: str = "bar", show_chart: bool = True,
+                                      exclude_categories=None, **kwargs):
         """Per-category spending for one or two periods with optional grouped bar chart."""
         if self.df.empty:
             return {"error": "No transaction data available."}
@@ -378,7 +414,7 @@ class FinanceTools(AnalyticsService):
         if y1 is None:
             return {"error": f"Could not parse period: '{period1}'"}
 
-        expenses = self.df[self.df['amount'] < 0].copy()
+        expenses = self._exclude(self.df[self.df['amount'] < 0].copy(), exclude_categories)
         df1 = self._filter_by_period(expenses, y1, m1)
         cats1 = df1.groupby('category')['amount'].sum().abs().to_dict()
 
@@ -439,12 +475,13 @@ class FinanceTools(AnalyticsService):
 
     # ── New proactive tools ────────────────────────────────────────────────
 
-    def spending_trend(self, category=None, chart_type="bar", show_chart=True, **kwargs):
+    def spending_trend(self, category=None, chart_type="bar", show_chart=True,
+                       exclude_categories=None, **kwargs):
         """Monthly spending trend, optionally filtered to one category."""
         if self.df.empty:
             return {"error": "No transaction data available."}
 
-        df = self.df[self.df['amount'] < 0].copy()
+        df = self._exclude(self.df[self.df['amount'] < 0].copy(), exclude_categories)
         if category:
             df = df[df['category'].str.lower() == category.lower()]
         if df.empty:
@@ -486,16 +523,16 @@ class FinanceTools(AnalyticsService):
 
         return result
 
-    def top_merchants(self, limit=10, show_chart=True, **kwargs):
+    def top_merchants(self, limit=10, show_chart=True, exclude_categories=None, **kwargs):
         """Top merchants/vendors by total spending with horizontal bar chart."""
         if self.df.empty:
             return {"error": "No transaction data available."}
-        expenses = self.df[self.df['amount'] < 0].copy()
+        expenses = self._exclude(self.df[self.df['amount'] < 0].copy(), exclude_categories)
         if expenses.empty:
             return {"error": "No expense data found."}
 
         top = expenses.groupby('description')['amount'].sum().abs()
-        top = top.sort_values(ascending=False).head(limit)
+        top = top.sort_values(ascending=False).head(int(limit or 10))
         merchants = {k: round(float(v), 2) for k, v in top.items()}
         result = {"merchants": merchants, "total_shown": round(float(top.sum()), 2)}
 
@@ -536,7 +573,7 @@ class FinanceTools(AnalyticsService):
         mean_spend = float(expenses['amount'].abs().mean())
         threshold = mean_spend * float(threshold_multiplier)
         flagged = expenses[expenses['amount'].abs() > threshold].copy()
-        flagged = flagged.sort_values('amount').head(limit)
+        flagged = flagged.sort_values('amount').head(int(limit or 10))
 
         result_list = []
         for _, row in flagged.iterrows():
@@ -578,11 +615,12 @@ class FinanceTools(AnalyticsService):
             "savings_rate_pct": round(savings_rate, 1)
         }
 
-    def biggest_transactions(self, limit=10, transaction_type="debit", category=None, **kwargs):
+    def biggest_transactions(self, limit=10, transaction_type="debit", category=None,
+                             exclude_categories=None, **kwargs):
         """Return the N largest individual transactions."""
         if self.df.empty:
             return {"error": "No transaction data available."}
-        df = self.df.copy()
+        df = self._exclude(self.df.copy(), exclude_categories)
         if transaction_type == "debit":
             df = df[df['amount'] < 0]
         elif transaction_type == "credit":
@@ -592,7 +630,7 @@ class FinanceTools(AnalyticsService):
 
         df = df.copy()
         df['abs_amount'] = df['amount'].abs()
-        df = df.sort_values('abs_amount', ascending=False).head(limit)
+        df = df.sort_values('abs_amount', ascending=False).head(int(limit or 10))
 
         txs = []
         for _, row in df.iterrows():

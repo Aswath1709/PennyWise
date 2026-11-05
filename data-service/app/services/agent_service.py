@@ -39,8 +39,23 @@ CRITICAL RULES FOR TOOL USAGE:
 11. 'biggest_transactions': Use when asked for the largest/most expensive individual purchases.
     Set transaction_type='debit' for expenses (default), 'credit' for income.
 
+CATEGORY FILTERS:
+- Category names must match the data. Available categories: {categories}.
+- "apart from X", "other than X", "excluding X", "without X", "besides X" → pass
+  exclude_categories=["X"] and repeat the previous question's tool with that filter.
+- Transfers (Zelle, Venmo, card payments, moving money between accounts) are usually not real
+  spending. Only include them when the user asks about them.
+
+FOLLOW-UP QUESTIONS:
+- The conversation so far is included. Short follow-ups ("what about dining?", "apart from
+  transfer?", "and last month?") refer to the previous question: reuse its tool and intent,
+  changing only what the user changed.
+
 Never guess numbers. Always use a tool.
 """
+
+MAX_HISTORY_MESSAGES = 6
+MAX_HISTORY_CHARS = 600
 
 class FinanceAgentService:
     """Finance agent using Gemini Native Function Calling."""
@@ -49,93 +64,104 @@ class FinanceAgentService:
         self.api_key = gemini_api_key or os.environ.get('GEMINI_API_KEY', '')
         self.model_name = os.environ.get('GEMINI_MODEL', 'gemini-2.5-flash')
         self.client = genai.Client(api_key=self.api_key) if GENAI_AVAILABLE else None
-        self.finance_tools = None
-        self.chart_paths = {}
 
-    def load_transactions(self, transactions: List[Dict]):
-        """Load transactions for analysis."""
-        self.finance_tools = FinanceTools(transactions)
-
-    def ask(self, query: str, session_id: str = "default", transactions: List[Dict] = None) -> Dict:
+    def ask(self, query: str, session_id: str = "default", transactions: List[Dict] = None,
+            history: List[Dict] = None) -> Dict:
         """Process query using Gemini Native Tool Calling."""
-        
-        if transactions:
-            self.load_transactions(transactions)
 
-        if not self.finance_tools or self.finance_tools.df.empty:
-            return {
-                "response": "No transaction data available.",
-                "charts": []
-            }
+        # Per-request tools: the service is a singleton, so don't keep request data on self.
+        finance_tools = FinanceTools(transactions or [])
+        if finance_tools.df.empty:
+            return {"response": "No transaction data available.", "charts": []}
 
-        self.chart_paths[session_id] = []
-
-        # Step 1: Let Gemini natively map the natural language to a tool
         if not self.client:
             return {
                 "response": "AI capabilities are currently unavailable because the required Google GenAI SDK is missing. Please make sure the data-service image was rebuilt.",
                 "charts": []
             }
 
-        try:
-            chat = self.client.chats.create(
-                model=self.model_name,
-                config=genai_types.GenerateContentConfig(
-                    system_instruction=SYSTEM_PROMPT,
-                    tools=get_gemini_tools(),
-                    tool_config=genai_types.ToolConfig(
-                        function_calling_config=genai_types.FunctionCallingConfig(
-                            mode="ANY"
-                        )
-                    )
-                )
-            )
-            response = chat.send_message(query)
+        categories = sorted({str(c) for c in finance_tools.df['category'].dropna().unique()})
 
-            # Find a function call among all parts
+        # Step 1: Let Gemini natively map the natural language to a tool
+        try:
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=self._build_contents(query, history),
+                config=genai_types.GenerateContentConfig(
+                    system_instruction=SYSTEM_PROMPT.replace("{categories}", ", ".join(categories)),
+                    tools=get_gemini_tools(),
+                    temperature=0,
+                    # Picking a tool doesn't need extended reasoning; thinking was the main
+                    # source of multi-second latency on 2.5 Flash.
+                    thinking_config=genai_types.ThinkingConfig(thinking_budget=0),
+                    automatic_function_calling=genai_types.AutomaticFunctionCallingConfig(disable=True),
+                    tool_config=genai_types.ToolConfig(
+                        function_calling_config=genai_types.FunctionCallingConfig(mode="ANY")
+                    ),
+                ),
+            )
+
             function_call = None
-            for part in response.candidates[0].content.parts:
+            candidates = response.candidates or []
+            parts = (candidates[0].content.parts if candidates and candidates[0].content else None) or []
+            for part in parts:
                 if part.function_call and part.function_call.name:
                     function_call = part.function_call
                     break
 
             if not function_call:
-                # No tool was called — return plain text
-                return {"response": response.text, "charts": []}
+                text = None
+                try:
+                    text = response.text
+                except Exception:
+                    pass
+                return {
+                    "response": text or "I couldn't work out how to answer that. Could you rephrase it?",
+                    "charts": []
+                }
 
             tool_name = function_call.name
-            tool_params = dict(function_call.args)
+            tool_params = dict(function_call.args or {})
 
         except Exception as e:
-            return {
-                "response": f"Error understanding query: {str(e)}",
-                "charts": []
-            }
+            return {"response": f"Error understanding query: {str(e)}", "charts": []}
 
         # Step 2: Execute the Python function dynamically
         try:
-            result = self.finance_tools.execute(tool_name, tool_params)
+            result = finance_tools.execute(tool_name, tool_params)
         except Exception as e:
-            return {
-                "response": f"Error executing {tool_name}: {str(e)}",
-                "charts": []
-            }
+            return {"response": f"Error executing {tool_name}: {str(e)}", "charts": []}
 
         # Step 3: Track any generated charts
-        chart_tools = ["create_chart", "compare_periods", "category_breakdown_by_period",
-                       "spending_trend", "top_merchants"]
-        if tool_name in chart_tools and result.get("chart_created"):
-            chart_path = result.get("chart_path")
-            if chart_path:
-                self.chart_paths[session_id].append(chart_path)
+        charts = []
+        if isinstance(result, dict) and result.get("chart_created") and result.get("chart_path"):
+            charts.append(result["chart_path"])
 
         # Step 4: Format the final response
         response_text = self._format_response(tool_name, result, query)
+        excluded = tool_params.get("exclude_categories")
+        if excluded and "error" not in result:
+            response_text = f"_Excluding: {', '.join(excluded)}_\n\n" + response_text
 
-        return {
-            "response": response_text,
-            "charts": self.chart_paths.get(session_id, [])
-        }
+        return {"response": response_text, "charts": charts}
+
+    @staticmethod
+    def _build_contents(query: str, history: List[Dict] = None):
+        """Turn recent chat messages into Gemini contents so follow-ups have context."""
+        contents = []
+        for msg in (history or [])[-MAX_HISTORY_MESSAGES:]:
+            text = (msg.get("content") or "").strip()
+            if not text or msg.get("isError"):
+                continue
+            role = "user" if msg.get("type") == "user" or msg.get("role") == "user" else "model"
+            contents.append(genai_types.Content(
+                role=role, parts=[genai_types.Part(text=text[:MAX_HISTORY_CHARS])]
+            ))
+        # Gemini expects the conversation to start with a user turn.
+        while contents and contents[0].role != "user":
+            contents.pop(0)
+        contents.append(genai_types.Content(role="user", parts=[genai_types.Part(text=query)]))
+        return contents
 
     def _format_response(self, tool_name: str, result: Dict, query: str) -> str:
         """Format tool result as natural language."""
