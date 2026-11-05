@@ -50,6 +50,8 @@ except ImportError:
     genai = None
     genai_types = None
 
+from app.services.agent_service import no_thinking_config
+
 
 # ========== SYSTEM PROMPT - from original agent.py ==========
 
@@ -150,7 +152,7 @@ class GeminiService:
             response_mime_type="application/json",
             response_schema=response_schema,
             # Classification needs no reasoning; thinking only adds latency.
-            thinking_config=genai_types.ThinkingConfig(thinking_budget=0),
+            thinking_config=no_thinking_config(),
         )
 
         async def run_batch(offset: int, batch):
