@@ -347,18 +347,13 @@ export default function Transactions() {
     }
   }, [accounts]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Accounts of the selected card type, shown by bank name. The last 4 digits are only
-  // added when the same bank has more than one account of this type and they need telling apart.
-  const accountsOfType = accounts.filter(acc => cardTypeOf(acc.account_type) === filterAccountType)
-  const banksWithSeveral = new Set(
-    accountsOfType
-      .map(acc => acc.bank_name)
-      .filter((name, i, all) => all.indexOf(name) !== all.lastIndexOf(name))
-  )
-  const accountOptions = accountsOfType
+  // Accounts of the selected card type, shown as "Bank (last 4 of the account number)".
+  // If the statement had no account number, just the bank name is shown.
+  const accountOptions = accounts
+    .filter(acc => cardTypeOf(acc.account_type) === filterAccountType)
     .map(acc => ({
       id: acc.id,
-      label: banksWithSeveral.has(acc.bank_name) && acc.account_last_four
+      label: acc.account_last_four
         ? `${acc.bank_name} (${acc.account_last_four})`
         : acc.bank_name
     }))
