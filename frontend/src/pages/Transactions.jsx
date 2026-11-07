@@ -403,6 +403,7 @@ export default function Transactions() {
     
     const result = await deleteTransaction(id)
     if (result.success) {
+      fetchAccounts() // an account may now be empty
       toast.success('Transaction deleted')
     } else {
       toast.error(result.error)
@@ -628,7 +629,7 @@ export default function Transactions() {
           categories={categories}
           transactions={transactions}
           onClose={() => setShowDeleteModal(false)}
-          onDeleted={fetchTransactions}
+          onDeleted={() => { fetchTransactions(); fetchAccounts() }}
         />
       )}
 
