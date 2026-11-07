@@ -3,7 +3,11 @@
  * PostgreSQL connection pool
  */
 
-const { Pool } = require('pg');
+const { Pool, types } = require('pg');
+
+// Return DATE columns as plain 'YYYY-MM-DD' strings instead of JS Dates,
+// so timezones can't shift a transaction into the previous day/month.
+types.setTypeParser(1082, (value) => value);
 
 // Create connection pool
 const pool = new Pool({
