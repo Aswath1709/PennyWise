@@ -5,6 +5,35 @@ from datetime import datetime
 from typing import List, Dict, Tuple, Optional
 from abc import ABC, abstractmethod
 
+# Labels a statement uses for the ACCOUNT number. Card numbers ("Card 1122" on a debit
+# card purchase line) are deliberately not here: several cards can share one account,
+# and the account is what statements and transactions should be grouped by.
+ACCOUNT_NUMBER_PATTERNS = [
+    # "Account Number: 000000123456789", "Account No. XXXX XXXX XXXX 1234", "Account #: ...1234"
+    r'\baccount\s*(?:number|no\.?|#)\s*[:#]?\s*([\dXx*•.\s-]{4,40})',
+    # "Primary account number: XX-XXXX-1234"
+    r'\bprimary\s+account\s+number\s*[:#]?\s*([\dXx*•.\s-]{4,40})',
+    # "Account ending in 1234"
+    r'\baccount\s+ending\s+in\s*[:#]?\s*([\dXx*•.\s-]{4,20})',
+]
+
+
+def find_account_last4(text: str, patterns: List[str] = ACCOUNT_NUMBER_PATTERNS) -> Optional[str]:
+    """
+    Return the last 4 digits of the statement's account number, or None.
+
+    Tries each pattern in order and uses the first match that contains at least 4 digits,
+    reading digits up to the end of the line they start on.
+    """
+    for pattern in patterns:
+        for match in re.finditer(pattern, text, re.IGNORECASE):
+            candidate = match.group(1).split('\n')[0]
+            digits = re.sub(r'\D', '', candidate)
+            if len(digits) >= 4:
+                return digits[-4:]
+    return None
+
+
 class BaseBankParser(ABC):
     """Abstract base class for all bank statement parsers."""
     
@@ -24,9 +53,8 @@ class ChaseParser(BaseBankParser):
     SKIP_KEYWORDS = ['TOTAL', 'BALANCE', 'PAGE', 'STATEMENT', 'BILLING', 'FEES', 'INTEREST', 'DATE DESCRIPTION']
 
     def extract_metadata(self, text: str) -> Tuple[Optional[str], int, int]:
-        # Account Number
-        acct_match = re.search(r'(?:account|acct|card|ending in)[\s#:]*[\dxX*\s-]*(\d{4})\b', text, re.IGNORECASE)
-        last4 = acct_match.group(1) if acct_match else None
+        # Account number (not a card number: one account can have several cards)
+        last4 = find_account_last4(text)
         
         # Statement Date
         text_dates = re.findall(r'([a-zA-Z]+)\s+\d{1,2},\s+(\d{4})', text)
@@ -74,8 +102,8 @@ class BankOfAmericaParser(BaseBankParser):
     """Placeholder strategy for parsing Bank of America statements."""
     
     def extract_metadata(self, text: str) -> Tuple[Optional[str], int, int]:
-        # Implement BoA specific metadata extraction here
-        return None, datetime.now().month, datetime.now().year
+        # Implement BoA specific statement date extraction here
+        return find_account_last4(text), datetime.now().month, datetime.now().year
 
     def parse_transactions(self, text: str, stmt_month: int, stmt_year: int) -> List[Dict]:
         # Implement BoA specific transaction extraction here
@@ -85,9 +113,8 @@ class PNCParser(BaseBankParser):
     """Strategy for parsing PNC Bank statements."""
     
     def extract_metadata(self, text: str) -> Tuple[Optional[str], int, int]:
-        # Account Number
-        acct_match = re.search(r'Primary account number:\s*XX-XXXX-(\d{4})', text, re.IGNORECASE)
-        last4 = acct_match.group(1) if acct_match else None
+        # Account number
+        last4 = find_account_last4(text)
         
         # Statement Date
         date_match = re.search(r'For the period (\d{2})/\d{2}/(\d{4}) to', text, re.IGNORECASE)
