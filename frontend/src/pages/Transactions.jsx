@@ -303,7 +303,8 @@ export default function Transactions() {
   const [filterCategory, setFilterCategory] = useState('')
   const [filterType, setFilterType] = useState('')
   const [filterAccount, setFilterAccount] = useState('')
-  const [filterAccountType, setFilterAccountType] = useState('')
+  // Card type is always set (debit by default); the account list depends on it
+  const [filterAccountType, setFilterAccountType] = useState('debit')
   const [editingId, setEditingId] = useState(null)
   const [editCategory, setEditCategory] = useState('')
   const [showDeleteModal, setShowDeleteModal] = useState(false)
@@ -329,12 +330,51 @@ export default function Transactions() {
     return parseFloat(String(val).replace(/[^\d.-]/g, '')) || 0;
   }
 
+  // Card type of an account or transaction; missing types come from checking/debit statements
+  const cardTypeOf = (type) => (type || 'debit').toLowerCase()
+  const cardTypeLabel = (type) => `${type.charAt(0).toUpperCase()}${type.slice(1)} Card`
+
+  // Card types offered = the types the user's accounts actually have (debit listed first)
+  const cardTypes = [...new Set(accounts.map(acc => cardTypeOf(acc.account_type)))]
+    .sort((a, b) => (a === 'debit' ? -1 : b === 'debit' ? 1 : a.localeCompare(b)))
+  if (cardTypes.length === 0) cardTypes.push('debit')
+
+  // If the selected type isn't available (e.g. no debit accounts), fall back to the first one
+  useEffect(() => {
+    if (accounts.length && !cardTypes.includes(filterAccountType)) {
+      setFilterAccountType(cardTypes[0])
+      setFilterAccount('')
+    }
+  }, [accounts]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Accounts of the selected card type, shown by bank name. The last 4 digits are only
+  // added when the same bank has more than one account of this type and they need telling apart.
+  const accountsOfType = accounts.filter(acc => cardTypeOf(acc.account_type) === filterAccountType)
+  const banksWithSeveral = new Set(
+    accountsOfType
+      .map(acc => acc.bank_name)
+      .filter((name, i, all) => all.indexOf(name) !== all.lastIndexOf(name))
+  )
+  const accountOptions = accountsOfType
+    .map(acc => ({
+      id: acc.id,
+      label: banksWithSeveral.has(acc.bank_name) && acc.account_last_four
+        ? `${acc.bank_name} (${acc.account_last_four})`
+        : acc.bank_name
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label))
+
+  const handleAccountTypeChange = (value) => {
+    setFilterAccountType(value)
+    setFilterAccount('') // the old account may not exist for the new card type
+  }
+
   const filteredTransactions = transactions.filter(tx => {
     const matchesSearch = tx.description.toLowerCase().includes(searchQuery.toLowerCase())
     const matchesCategory = !filterCategory || tx.category_id === parseInt(filterCategory)
     const matchesType = !filterType || tx.type === filterType
     const matchesAccount = !filterAccount || tx.bank_account_id === parseInt(filterAccount)
-    const matchesAccountType = !filterAccountType || tx.account_type === filterAccountType
+    const matchesAccountType = cardTypeOf(tx.account_type) === filterAccountType
     return matchesSearch && matchesCategory && matchesType && matchesAccount && matchesAccountType
   })
 
@@ -439,17 +479,16 @@ export default function Transactions() {
             <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
           </div>
 
+          {/* Card type first: it decides which accounts are listed next */}
           <div className="relative">
             <select
-              value={filterAccount}
-              onChange={(e) => setFilterAccount(e.target.value)}
-              className="pl-4 pr-8 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none appearance-none bg-white min-w-[160px]"
+              value={filterAccountType}
+              onChange={(e) => handleAccountTypeChange(e.target.value)}
+              aria-label="Card type"
+              className="pl-4 pr-8 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none appearance-none bg-white min-w-[150px]"
             >
-              <option value="">All Accounts</option>
-              {accounts.map(acc => (
-                <option key={acc.id} value={acc.id}>
-                  {acc.bank_name} - {acc.account_last_four || 'XXXX'}
-                </option>
+              {cardTypes.map(type => (
+                <option key={type} value={type}>{cardTypeLabel(type)}</option>
               ))}
             </select>
             <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
@@ -457,13 +496,15 @@ export default function Transactions() {
 
           <div className="relative">
             <select
-              value={filterAccountType}
-              onChange={(e) => setFilterAccountType(e.target.value)}
-              className="pl-4 pr-8 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none appearance-none bg-white min-w-[150px]"
+              value={filterAccount}
+              onChange={(e) => setFilterAccount(e.target.value)}
+              aria-label="Account"
+              className="pl-4 pr-8 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none appearance-none bg-white min-w-[160px]"
             >
-              <option value="">All Card Types</option>
-              <option value="credit">Credit Cards</option>
-              <option value="debit">Debit Cards</option>
+              <option value="">{accountOptions.length ? 'All Accounts' : 'No accounts'}</option>
+              {accountOptions.map(acc => (
+                <option key={acc.id} value={acc.id}>{acc.label}</option>
+              ))}
             </select>
             <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
           </div>
