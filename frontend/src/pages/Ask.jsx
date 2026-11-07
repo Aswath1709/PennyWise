@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useTransactionStore } from '../store/transactionStore'
-import { useChatStore } from '../store/chatStore'
+import { useChatStore, useMyMessages } from '../store/chatStore'
+import { useAuthStore } from '../store/authStore'
 import { dataService } from '../services/api'
 import { 
   MessageSquare, 
@@ -125,7 +126,9 @@ function MarkdownMessage({ content }) {
 
 export default function Ask() {
   const { transactions, fetchTransactions } = useTransactionStore()
-  const { messages, isLoading: loading, addMessage, clearChat, setIsLoading: setLoading } = useChatStore()
+  const messages = useMyMessages()
+  const userId = useAuthStore(s => s.user?.id)
+  const { isLoading: loading, addMessage, setIsLoading: setLoading } = useChatStore()
   const [query, setQuery] = useState('')
   const [suggestions, setSuggestions] = useState([])
   const messagesEndRef = useRef(null)
@@ -173,7 +176,9 @@ export default function Ask() {
       .slice(-6)
       .map(m => ({ type: m.type, content: m.content }))
     
-    addMessage({ type: 'user', content: userQuery })
+    // Remember who asked, so the reply goes to their chat even if they log out meanwhile
+    const askedBy = userId
+    addMessage({ type: 'user', content: userQuery }, askedBy)
     setLoading(true)
 
     try {
@@ -193,14 +198,14 @@ export default function Ask() {
         content: response.data.response,
         data: response.data.data,
         visualization: response.data.visualization
-      })
+      }, askedBy)
     } catch (error) {
       console.error('Query error:', error)
       addMessage({ 
         type: 'bot', 
         content: 'Sorry, I had trouble processing your question. Please try again.',
         isError: true
-      })
+      }, askedBy)
     } finally {
       setLoading(false)
     }

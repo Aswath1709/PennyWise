@@ -1,5 +1,11 @@
 import { create } from 'zustand'
 import api from '../services/api'
+import { useTransactionStore } from './transactionStore'
+
+// Drop the previous user's data held in memory, so the next login never sees it
+const clearUserData = () => {
+  useTransactionStore.setState({ transactions: [], accounts: [], analytics: null, error: null })
+}
 
 export const useAuthStore = create((set, get) => ({
   user: null,
@@ -14,7 +20,8 @@ export const useAuthStore = create((set, get) => ({
     try {
       const response = await api.post('/auth/login', { email, password })
       const { user, token } = response.data
-      
+
+      clearUserData()
       set({ 
         user, 
         token, 
@@ -39,7 +46,8 @@ export const useAuthStore = create((set, get) => ({
     try {
       const response = await api.post('/auth/register', { name, email, password })
       const { user, token } = response.data
-      
+
+      clearUserData()
       set({ 
         user, 
         token, 
@@ -59,6 +67,7 @@ export const useAuthStore = create((set, get) => ({
 
   // Logout
   logout: () => {
+    clearUserData()
     set({ 
       user: null, 
       token: null, 
