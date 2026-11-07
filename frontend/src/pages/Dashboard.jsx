@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useTransactionStore } from '../store/transactionStore'
 import { useAuthStore } from '../store/authStore'
@@ -20,10 +20,19 @@ import {
 
 const COLORS = ['#22c55e', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316']
 
+const monthKey = (date) => String(date || '').slice(0, 7) // 'YYYY-MM'
+const monthLabel = (key, style = 'long') => {
+  const [y, m] = key.split('-').map(Number)
+  if (!y || !m) return key
+  return new Date(y, m - 1, 1).toLocaleString('en-US', { month: style, year: 'numeric' })
+}
+const absAmount = (tx) => Math.abs(parseFloat(tx.amount) || 0)
+
 export default function Dashboard() {
-  const { transactions, accounts, fetchTransactions, fetchAccounts, fetchAnalytics, analytics, isLoading } = useTransactionStore()
+  const { transactions, accounts, fetchTransactions, fetchAccounts } = useTransactionStore()
   const { token, isAuthenticated } = useAuthStore()
   const [loading, setLoading] = useState(true)
+  const [selectedMonth, setSelectedMonth] = useState(null)
 
   useEffect(() => {
     const loadData = async () => {
@@ -46,10 +55,60 @@ export default function Dashboard() {
     }
   }, [isAuthenticated, token])
 
+  // Months that have data, newest first
+  const months = useMemo(() => {
+    const keys = new Set(transactions.map(t => monthKey(t.date)).filter(Boolean))
+    return [...keys].sort().reverse()
+  }, [transactions])
+
+  // Default to the latest month with data; reset if that month disappears
   useEffect(() => {
-    if (transactions.length > 0) {
-      fetchAnalytics()
+    if (months.length && (!selectedMonth || !months.includes(selectedMonth))) {
+      setSelectedMonth(months[0])
     }
+  }, [months, selectedMonth])
+
+  const activeMonth = selectedMonth || months[0]
+
+  // Stats, category breakdown and recent transactions for the selected month
+  const monthData = useMemo(() => {
+    const monthTx = transactions.filter(t => monthKey(t.date) === activeMonth)
+    let spending = 0
+    let income = 0
+    const byCategory = {}
+    for (const t of monthTx) {
+      const amt = absAmount(t)
+      if (t.type === 'credit') {
+        income += amt
+      } else {
+        spending += amt
+        const cat = t.category_name || 'Uncategorized'
+        byCategory[cat] = (byCategory[cat] || 0) + amt
+      }
+    }
+    const spendingByCategory = Object.entries(byCategory)
+      .map(([category_name, total_amount]) => ({ category_name, total_amount }))
+      .sort((a, b) => b.total_amount - a.total_amount)
+    const accountIds = new Set(monthTx.map(t => t.bank_account_id).filter(Boolean))
+    return { monthTx, spending, income, spendingByCategory, accountCount: accountIds.size }
+  }, [transactions, activeMonth])
+
+  // Trend across all months (oldest first)
+  const monthlyTrend = useMemo(() => {
+    const byMonth = {}
+    for (const t of transactions) {
+      const k = monthKey(t.date)
+      if (!k) continue
+      byMonth[k] = byMonth[k] || { total_income: 0, total_spending: 0 }
+      if (t.type === 'credit') byMonth[k].total_income += absAmount(t)
+      else byMonth[k].total_spending += absAmount(t)
+    }
+    return Object.keys(byMonth).sort().map(k => ({
+      key: k,
+      month: monthLabel(k, 'short'),
+      total_income: Math.round(byMonth[k].total_income * 100) / 100,
+      total_spending: Math.round(byMonth[k].total_spending * 100) / 100
+    }))
   }, [transactions])
 
   if (loading) {
@@ -83,40 +142,56 @@ export default function Dashboard() {
   }
 
   const stats = {
-    total_spending: Math.abs(analytics?.total_spent || 0),
-    total_income: analytics?.total_income || 0,
-    total_transactions: analytics?.total_transactions || transactions.length
+    total_spending: monthData.spending,
+    total_income: monthData.income,
+    total_transactions: monthData.monthTx.length
   }
-  const spendingByCategory = analytics?.spending_by_category || []
-  const monthlyTrend = analytics?.monthly_trend || []
+  const spendingByCategory = monthData.spendingByCategory
+  const activeLabel = activeMonth ? monthLabel(activeMonth) : ''
+  const shortLabel = activeMonth ? monthLabel(activeMonth, 'short') : ''
 
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-        <p className="text-gray-600">Your financial overview at a glance</p>
+      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
+          <p className="text-gray-600">
+            {activeMonth === months[0] ? 'Your latest month' : 'Overview'}: <span className="font-medium text-gray-900">{activeLabel}</span>
+          </p>
+        </div>
+        <select
+          value={activeMonth || ''}
+          onChange={(e) => setSelectedMonth(e.target.value)}
+          className="px-3 py-2 border border-gray-300 rounded-lg bg-white text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary-500"
+          aria-label="Select month"
+        >
+          {months.map(m => (
+            <option key={m} value={m}>{monthLabel(m)}</option>
+          ))}
+        </select>
       </div>
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
         <StatCard
-          title="Total Spending"
+          title="Spending"
           value={stats.total_spending || 0}
           icon={TrendingDown}
           color="text-red-500"
           bgColor="bg-red-50"
         />
         <StatCard
-          title="Total Income"
+          title="Income"
           value={stats.total_income || 0}
           icon={TrendingUp}
           color="text-green-500"
           bgColor="bg-green-50"
         />
         <StatCard
-          title="Net Balance"
+          title="Net"
           value={(stats.total_income || 0) - (stats.total_spending || 0)}
+          signed
           icon={DollarSign}
           color="text-blue-500"
           bgColor="bg-blue-50"
@@ -131,7 +206,7 @@ export default function Dashboard() {
         />
         <StatCard
           title="Accounts"
-          value={accounts.length}
+          value={monthData.accountCount || accounts.length}
           icon={CreditCard}
           color="text-purple-500"
           bgColor="bg-purple-50"
@@ -143,7 +218,7 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Spending by Category */}
         <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Spending by Category</h3>
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">Spending by Category · {shortLabel}</h3>
           {spendingByCategory.length > 0 ? (
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
@@ -159,7 +234,7 @@ export default function Dashboard() {
                     paddingAngle={2}
                   >
                     {spendingByCategory.map((entry, index) => (
-                      <Cell key={entry.category_id} fill={COLORS[index % COLORS.length]} />
+                      <Cell key={entry.category_name} fill={COLORS[index % COLORS.length]} />
                     ))}
                   </Pie>
                   <Tooltip 
@@ -176,13 +251,13 @@ export default function Dashboard() {
           )}
           {/* Legend */}
           <div className="mt-4 flex flex-wrap gap-3">
-            {spendingByCategory.slice(0, 5).map((cat, index) => (
-              <div key={cat.category_id} className="flex items-center gap-2 text-sm">
+            {spendingByCategory.slice(0, 6).map((cat, index) => (
+              <div key={cat.category_name} className="flex items-center gap-2 text-sm">
                 <div 
                   className="w-3 h-3 rounded-full" 
                   style={{ backgroundColor: COLORS[index % COLORS.length] }}
                 />
-                <span className="text-gray-600">{cat.category_name}</span>
+                <span className="text-gray-600">{cat.category_name} · ${cat.total_amount.toFixed(0)}</span>
               </div>
             ))}
           </div>
@@ -190,11 +265,19 @@ export default function Dashboard() {
 
         {/* Monthly Trend */}
         <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Monthly Trend</h3>
+          <h3 className="text-lg font-semibold text-gray-900 mb-1">Monthly Trend</h3>
+          <p className="text-xs text-gray-500 mb-3">All months · click a month to view it</p>
           {monthlyTrend.length > 0 ? (
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={monthlyTrend}>
+                <AreaChart
+                  data={monthlyTrend}
+                  onClick={(e) => {
+                    const key = e?.activePayload?.[0]?.payload?.key
+                    if (key) setSelectedMonth(key)
+                  }}
+                  style={{ cursor: 'pointer' }}
+                >
                   <defs>
                     <linearGradient id="colorSpending" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="#ef4444" stopOpacity={0.1}/>
@@ -242,20 +325,20 @@ export default function Dashboard() {
       {/* Recent Transactions */}
       <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-gray-900">Recent Transactions</h3>
+          <h3 className="text-lg font-semibold text-gray-900">Recent Transactions · {shortLabel}</h3>
           <Link to="/transactions" className="text-primary-600 hover:text-primary-700 text-sm font-medium flex items-center gap-1">
             View all <ArrowRight className="w-4 h-4" />
           </Link>
         </div>
         <div className="divide-y divide-gray-100">
-          {transactions.slice(0, 5).map((tx) => (
+          {monthData.monthTx.slice(0, 5).map((tx) => (
             <div key={tx.id} className="py-3 flex items-center justify-between">
               <div>
                 <p className="font-medium text-gray-900">{tx.description}</p>
                 <p className="text-sm text-gray-500">{tx.category_name || 'Uncategorized'} • {tx.date}</p>
               </div>
               <span className={`font-semibold ${tx.type === 'credit' ? 'text-green-600' : 'text-gray-900'}`}>
-                {tx.type === 'credit' ? '+' : '-'}${parseFloat(tx.amount).toFixed(2)}
+                {tx.type === 'credit' ? '+' : '-'}${absAmount(tx).toFixed(2)}
               </span>
             </div>
           ))}
@@ -266,14 +349,16 @@ export default function Dashboard() {
 }
 
 // Stat Card Component
-function StatCard({ title, value, icon: Icon, color, bgColor, isCurrency = true }) {
+function StatCard({ title, value, icon: Icon, color, bgColor, isCurrency = true, signed = false }) {
   return (
     <div className="stat-card">
       <div className="flex items-center justify-between">
         <div>
           <p className="text-sm text-gray-500">{title}</p>
           <p className="text-2xl font-bold text-gray-900 mt-1">
-            {isCurrency ? `$${Math.abs(value).toFixed(2)}` : value}
+            {isCurrency
+              ? `${signed && value < 0 ? '-' : ''}$${Math.abs(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+              : value}
           </p>
         </div>
         <div className={`w-12 h-12 ${bgColor} rounded-lg flex items-center justify-center`}>

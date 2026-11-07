@@ -96,40 +96,80 @@ router.get('/', asyncHandler(async (req, res) => {
  * summary: Create multiple transactions
  */
 router.post('/bulk', asyncHandler(async (req, res) => {
-  const { transactions, bank_metadata } = req.body;
+  const { transactions, bank_metadata, upload_metadata } = req.body;
 
   if (!Array.isArray(transactions) || transactions.length === 0) {
     return res.status(400).json({ error: 'Transactions array required' });
   }
 
   const client = await db.getClient();
-  
+
   try {
     await client.query('BEGIN');
-    
+
+    // 1. Find or create the bank account this statement belongs to.
+    //    An account is identified by bank + type (credit card vs checking) + last 4 digits,
+    //    so a Chase card and a Chase checking account stay separate.
     let bank_account_id = null;
+    let account = null;
     if (bank_metadata && bank_metadata.bank_name) {
+      const bankName = bank_metadata.bank_name;
+      const accountType = bank_metadata.statement_type || 'debit';
+      const last4 = bank_metadata.account_last4 || '';
+
       const accCheck = await client.query(
-        `SELECT id FROM bank_accounts WHERE user_id = $1 AND bank_name = $2 AND account_last_four = $3`,
-        [req.user.id, bank_metadata.bank_name, bank_metadata.account_last4 || '']
+        `SELECT * FROM bank_accounts
+         WHERE user_id = $1 AND bank_name = $2
+           AND COALESCE(account_last_four, '') = $3
+           AND COALESCE(account_type, 'debit') = $4
+         ORDER BY id LIMIT 1`,
+        [req.user.id, bankName, last4, accountType]
       );
       if (accCheck.rows.length > 0) {
-        bank_account_id = accCheck.rows[0].id;
+        account = accCheck.rows[0];
       } else {
         const accInsert = await client.query(
           `INSERT INTO bank_accounts (user_id, bank_name, account_type, account_last_four)
-           VALUES ($1, $2, $3, $4) RETURNING id`,
-          [req.user.id, bank_metadata.bank_name, bank_metadata.statement_type || 'debit', bank_metadata.account_last4 || '']
+           VALUES ($1, $2, $3, $4) RETURNING *`,
+          [req.user.id, bankName, accountType, last4]
         );
-        bank_account_id = accInsert.rows[0].id;
+        account = accInsert.rows[0];
       }
+      bank_account_id = account.id;
+    }
+
+    // 2. Skip transactions that are already stored for this account, so re-uploading a
+    //    statement (or overlapping statements) doesn't double count. Identical transactions
+    //    inside one statement (e.g. two $5 coffees on the same day) are kept: we only
+    //    insert as many copies as exceed what the database already has.
+    const keyOf = (date, description, amount) =>
+      `${String(date).slice(0, 10)}|${String(description).trim().toLowerCase()}|${Number(amount).toFixed(2)}`;
+
+    const existingCounts = new Map();
+    const dates = transactions.map(t => String(t.date).slice(0, 10)).sort();
+    const existing = await client.query(
+      `SELECT date, description, amount FROM transactions
+       WHERE user_id = $1 AND bank_account_id IS NOT DISTINCT FROM $2
+         AND date BETWEEN $3 AND $4`,
+      [req.user.id, bank_account_id, dates[0], dates[dates.length - 1]]
+    );
+    for (const row of existing.rows) {
+      const k = keyOf(row.date, row.description, row.amount);
+      existingCounts.set(k, (existingCounts.get(k) || 0) + 1);
     }
 
     const insertedIds = [];
-    
+    let skipped = 0;
+
     for (const t of transactions) {
+      const k = keyOf(t.date, t.description, t.amount);
+      const remaining = existingCounts.get(k) || 0;
+      if (remaining > 0) {
+        existingCounts.set(k, remaining - 1);
+        skipped++;
+        continue;
+      }
       const result = await client.query(
-        // ai_categorized removed from columns and values below
         `INSERT INTO transactions (user_id, bank_account_id, date, description, amount, type, category_id, raw_description)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          RETURNING id`,
@@ -147,8 +187,30 @@ router.post('/bulk', asyncHandler(async (req, res) => {
       insertedIds.push(result.rows[0].id);
     }
 
+    // 3. Keep a record of the uploaded statement.
+    if (upload_metadata && upload_metadata.filename) {
+      await client.query(
+        `INSERT INTO statement_uploads
+           (user_id, bank_account_id, filename, statement_start_date, statement_end_date, transactions_count, status)
+         VALUES ($1, $2, $3, $4, $5, $6, 'completed')`,
+        [
+          req.user.id,
+          bank_account_id,
+          String(upload_metadata.filename).slice(0, 255),
+          upload_metadata.statement_start_date || null,
+          upload_metadata.statement_end_date || null,
+          insertedIds.length
+        ]
+      );
+    }
+
     await client.query('COMMIT');
-    res.status(201).json({ count: insertedIds.length, ids: insertedIds });
+    res.status(201).json({
+      count: insertedIds.length,
+      skipped,
+      ids: insertedIds,
+      account
+    });
 
   } catch (error) {
     await client.query('ROLLBACK');
